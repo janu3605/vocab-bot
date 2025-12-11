@@ -1,54 +1,44 @@
-// src/pages/api/bot.js
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-// Initialize Gemini outside the handler to save resources
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 export default async function handler(req, res) {
-  // 1. Only allow POST requests (Telegram sends POST)
-  if (req.method !== 'POST') {
-    return res.status(200).send('Method Not Allowed');
-  }
+  if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
 
   try {
-    const { message } = req.body;
+    const { message } = req.body; // Expecting { message: "Hello" } from frontend
 
-    // Safety check: Ensure a message exists
-    if (!message || !message.text) {
-      return res.status(200).json({ status: 'ignored' });
-    }
-
-    // 2. The Prompt Strategy
+    // 1. Setup Gemini
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    
+    // 2. Your Vocab Prompt
     const prompt = `
-      You are a vocabulary coach. The user sent: "${message.text}"
+      User input: "${message}"
       
       Task:
-      1. Rewrite their sentence using B2/C1 level vocabulary (bold the changes).
-      2. Provide a conversational reply to keep the chat going.
+      1. Rewrite the input using sophisticated (B2/C1) vocabulary. Bold the changes using HTML <b> tags.
+      2. Provide a short, engaging conversational reply.
       
-      Format: "Your Version: ... \n\n My Reply: ..."
+      Return JSON format:
+      {
+        "polished": "The polished version string...",
+        "reply": "The conversational reply string..."
+      }
     `;
 
+    // 3. Generate
     const result = await model.generateContent(prompt);
-    const aiResponse = result.response.text();
+    const text = result.response.text();
+    
+    // 4. Clean the JSON (Gemini sometimes adds markdown backticks)
+    const jsonString = text.replace(/```json|```/g, '').trim();
+    const data = JSON.parse(jsonString);
 
-    // 3. Send reply back to Telegram
-    await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: message.chat.id,
-        text: aiResponse,
-        parse_mode: 'Markdown'
-      })
-    });
-
-    // 4. Respond to Telegram's server so it stops retrying
-    return res.status(200).send('OK');
+    // 5. Send back to your Frontend
+    res.status(200).json(data);
 
   } catch (error) {
-    console.error('Error:', error);
-    return res.status(500).send('Internal Server Error');
+    console.error(error);
+    res.status(500).json({ error: 'Failed to generate response' });
   }
 }
